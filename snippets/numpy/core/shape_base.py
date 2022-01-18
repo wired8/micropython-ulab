@@ -20,3 +20,19 @@ def atleast_1d(*arys):
         return res[0]
     else:
         return res
+
+def atleast_2d(*arys):
+    res = []
+    for ary in arys:
+        ary = asarray(ary)
+        if len(ary.shape) == 0:
+            result = ary.reshape(1, 1)
+        elif len(ary.shape) == 1:
+            result = ary[None, :]
+        else:
+            result = ary
+        res.append(result)
+    if len(res) == 1:
+        return res[0]
+    else:
+        return res        

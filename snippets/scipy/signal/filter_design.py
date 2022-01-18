@@ -4,7 +4,7 @@ from ulab import numpy
 from ulab import numpy as np
 from ulab import scipy as spy
 
-from ...numpy import (atleast_1d, poly, asarray, prod, size, append, nonzero, zeros_like, isreal)
+from ...numpy import (atleast_1d, atleast_2d, poly, asarray, prod, size, append, nonzero, zeros_like, isreal)
 
 def butter(N, Wn, btype='low', analog=False, output='ba', fs=None):
     """
@@ -1445,6 +1445,18 @@ def fft(x):
     even = fft(x[0::2])
     odd =  fft(x[1::2])
     return [even[m] + math.e**(-2j*math.pi*m/n)*odd[m] for m in range(n//2)] + [even[m] - math.e**(-2j*math.pi*m/n)*odd[m] for m in range(n//2)]
+
+def _validate_sos(sos):
+    """Helper to validate a SOS input"""
+    sos = atleast_2d(sos)
+    if len(sos.shape) != 2:
+        raise ValueError('sos array must be 2D')
+    n_sections, m = sos.shape
+    if m != 6:
+        raise ValueError('sos array must be shape (n_sections, 6)')
+    if not np.all(sos[:, 3] == 1):
+        raise ValueError('sos[:, 3] should be all ones')
+    return sos, n_sections
 
 filter_dict = {'butter': [buttap, buttord],
                'butterworth': [buttap, buttord]

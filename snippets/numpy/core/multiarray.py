@@ -25,3 +25,7 @@ def asarray(a, dtype=None):
           except:
               pass
         raise ValueError('Could not cast %s to array' % (a))
+
+
+def normalize_axis_index():
+  return
