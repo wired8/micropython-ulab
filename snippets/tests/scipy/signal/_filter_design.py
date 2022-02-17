@@ -7,6 +7,11 @@ from ulab import numpy as np
 
 np.set_printoptions(threshold=100)
 
+z = np.array([1.0+0.0j, 1.0+0.0j, 1.0+0.0j, 1.0+0.0j, -1.0+0.0j, -1.0+0.0j], dtype=np.complex) 
+p = np.array([0.9973072, 0.9973072, 0.1122792, 0.1122792, 0.9860069, 0.9078636]) 
+k = 0.2343006
+print(scipy.zpk2sos(z,p,k))
+
 a = [4, 3, 1, 2-2j, 2+2j, 2-1j, 2+1j, 2-1j, 2+1j, 1+1j, 1-1j]
 #print('_cplxreal: ', scipy.cplxreal(a))
 f = np.array([-1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0], dtype=np.float)

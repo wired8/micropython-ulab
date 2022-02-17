@@ -67,4 +67,7 @@ def isreal(x):
     """
     x = asarray(x)
     result =  _isreal(x)
-    return result if len(result) > 1 else result[0]
+    if len(result) == 0:
+        return result
+    else:    
+        return result if len(result) > 1 else result[0]

@@ -4,7 +4,7 @@ from ulab import numpy
 from ulab import numpy as np
 from ulab import scipy as spy
 
-from ...numpy import (atleast_1d, poly, asarray, prod, size, append, nonzero, zeros_like, isreal)
+from ...numpy import (atleast_1d, atleast_2d, poly, asarray, prod, size, append, nonzero, zeros_like, isreal)
 
 def butter(N, Wn, btype='low', analog=False, output='ba', fs=None):
     """
@@ -279,6 +279,11 @@ def iirfilter(N, Wn, rp=None, rs=None, btype='band', analog=False,
     # Get analog lowpass prototype
     if typefunc == buttap:
         z, p, k = typefunc(N)
+    elif typefunc == cheb1ap:
+        if rp is None:
+            raise ValueError("passband ripple (rp) must be provided to "
+                             "design a Chebyshev I filter.")
+        z, p, k = typefunc(N, rp)    
     else:
         raise NotImplementedError("'%s' not implemented in iirfilter." % ftype)
 
@@ -395,7 +400,7 @@ def zpk2tf(z, p, k):
 def _to_tuple(a):
     result = []
     for x in a:
-       result.append([x.real, x.imag])
+        result.append([x.real, x.imag])
     return result
 
 def _to_complex(a):
@@ -695,11 +700,13 @@ def zpk2sos(z, p, k, pairing='nearest'):
 
     # ensure we have the same number of poles and zeros, and make copies
 
+    
+
     if len(z) != len(p):
         if max(len(z) - len(p),0) > 0:  
-            p = np.concatenate((p, np.zeros((max(len(z) - len(p), 0)),dtype=np.complex)))
+            p = np.concatenate((p+0j, np.zeros((max(len(z) - len(p), 0)),dtype=np.complex)))
         if max(len(p) - len(z),0) > 0:   
-            z = np.concatenate((z, np.zeros((max(len(p) - len(z), 0)), dtype=np.complex)))
+            z = np.concatenate((z+0j, np.zeros((max(len(p) - len(z), 0)), dtype=np.complex)))
 
     n_sections = (max(len(p), len(z)) + 1) // 2
     sos = np.zeros((n_sections, 6))
@@ -711,23 +718,25 @@ def zpk2sos(z, p, k, pairing='nearest'):
     assert len(p) == len(z)
 
     z = np.array(z, dtype=np.complex)
-
-
+    p = p + 0j
+ 
     # Ensure we have complex conjugate pairs
     # (note that _cplxreal only gives us one element of each complex pair):
     cplx, rel = _cplxreal(p)
-    if len(rel) > 0 and len(cplx) > 0:
-        p = np.concatenate((cplx, np.array(rel, dtype=np.complex))) 
-    else:
-        p = cplx
-   
-    
-    cplx, rel = _cplxreal(z)
-    if len(rel) > 0 and len(cplx) > 0:
-        z = np.concatenate((cplx, np.array(rel, dtype=np.complex))) 
-    else:
-        z = rel
+    if (len(cplx) > 0 and len(rel) > 0):
+        a = cplx + 0j
+        b = np.array(rel, dtype=np.complex)
+        p = np.concatenate((a,b)) 
+    if (len(cplx) == 0 or len(rel) == 0):
+        if (len(cplx) > len(rel)):
+            p = cplx
+        else:
+            p = np.array(rel, dtype=np.complex)    
 
+    cplx, rel = _cplxreal(z)
+    if (len(cplx) > 0):
+        z = np.concatenate((cplx+0j, np.array(rel, dtype=np.complex))) 
+  
     p_sos = np.zeros((n_sections, 2))
     z_sos = zeros_like(p_sos)
 
@@ -737,7 +746,8 @@ def zpk2sos(z, p, k, pairing='nearest'):
         p1 = p[p1_idx]
         p = np.delete(p, p1_idx)
         # Pair that pole with a zero
-        if isreal(p1) and np.sum([isreal(p)]) == 0:
+        irp = [isreal(p)] if type(isreal(p)) is bool else isreal(p) 
+        if isreal(p1) and np.sum(irp) == 0:
             # Special case to set a first-order section
             z1_idx = _nearest_real_complex_idx(z, p1, 'real')
             z1 = z[z1_idx]
@@ -791,7 +801,7 @@ def zpk2sos(z, p, k, pairing='nearest'):
 
         p_sos = np.array(p_sos, dtype=np.complex)
         p_sos[si] = np.array([p1, p2], dtype=np.complex)
-        z_sos[si] = np.array([z1, z2], dtype=np.float)
+        z_sos[si] = np.real(np.array([z1, z2], dtype=np.complex))
 
     assert len(p) == len(z) == 0  # we've consumed all poles and zeros
     del p, z
@@ -1076,7 +1086,7 @@ def _nearest_real_complex_idx(fro, to, which):
     order = np.argsort(a, axis=0)   # Differs from numpy  TODO
     fo = [fro[i] for i in order]
     sorted_array_list = [fro[i] for i in order]
-    mask = isreal(np.array(sorted_array_list, dtype=np.float))
+    mask = isreal(np.real(np.array(sorted_array_list, dtype=np.complex)))
     if which == 'complex':
         mask = ~mask
     mask = np.array([mask], dtype=np.uint16)
@@ -1446,9 +1456,153 @@ def fft(x):
     odd =  fft(x[1::2])
     return [even[m] + math.e**(-2j*math.pi*m/n)*odd[m] for m in range(n//2)] + [even[m] - math.e**(-2j*math.pi*m/n)*odd[m] for m in range(n//2)]
 
+def _validate_sos(sos):
+    """Helper to validate a SOS input"""
+    sos = atleast_2d(sos)
+    if len(sos.shape) != 2:
+        raise ValueError('sos array must be 2D')
+    n_sections, m = sos.shape
+    if m != 6:
+        raise ValueError('sos array must be shape (n_sections, 6)')
+    if not np.all(sos[:, 3] == 1):
+        raise ValueError('sos[:, 3] should be all ones')
+    return sos, n_sections
+
+def cheby1(N, rp, Wn, btype='low', analog=False, output='ba', fs=None):
+    """
+    Chebyshev type I digital and analog filter design.
+    Design an Nth-order digital or analog Chebyshev type I filter and
+    return the filter coefficients.
+    Parameters
+    ----------
+    N : int
+        The order of the filter.
+    rp : float
+        The maximum ripple allowed below unity gain in the passband.
+        Specified in decibels, as a positive number.
+    Wn : array_like
+        A scalar or length-2 sequence giving the critical frequencies.
+        For Type I filters, this is the point in the transition band at which
+        the gain first drops below -`rp`.
+        For digital filters, `Wn` are in the same units as `fs`. By default,
+        `fs` is 2 half-cycles/sample, so these are normalized from 0 to 1,
+        where 1 is the Nyquist frequency. (`Wn` is thus in
+        half-cycles / sample.)
+        For analog filters, `Wn` is an angular frequency (e.g., rad/s).
+    btype : {'lowpass', 'highpass', 'bandpass', 'bandstop'}, optional
+        The type of filter.  Default is 'lowpass'.
+    analog : bool, optional
+        When True, return an analog filter, otherwise a digital filter is
+        returned.
+    output : {'ba', 'zpk', 'sos'}, optional
+        Type of output:  numerator/denominator ('ba'), pole-zero ('zpk'), or
+        second-order sections ('sos'). Default is 'ba' for backwards
+        compatibility, but 'sos' should be used for general-purpose filtering.
+    fs : float, optional
+        The sampling frequency of the digital system.
+        .. versionadded:: 1.2.0
+    Returns
+    -------
+    b, a : ndarray, ndarray
+        Numerator (`b`) and denominator (`a`) polynomials of the IIR filter.
+        Only returned if ``output='ba'``.
+    z, p, k : ndarray, ndarray, float
+        Zeros, poles, and system gain of the IIR filter transfer
+        function.  Only returned if ``output='zpk'``.
+    sos : ndarray
+        Second-order sections representation of the IIR filter.
+        Only returned if ``output=='sos'``.
+    See Also
+    --------
+    cheb1ord, cheb1ap
+    Notes
+    -----
+    The Chebyshev type I filter maximizes the rate of cutoff between the
+    frequency response's passband and stopband, at the expense of ripple in
+    the passband and increased ringing in the step response.
+    Type I filters roll off faster than Type II (`cheby2`), but Type II
+    filters do not have any ripple in the passband.
+    The equiripple passband has N maxima or minima (for example, a
+    5th-order filter has 3 maxima and 2 minima). Consequently, the DC gain is
+    unity for odd-order filters, or -rp dB for even-order filters.
+    The ``'sos'`` output parameter was added in 0.16.0.
+    Examples
+    --------
+    Design an analog filter and plot its frequency response, showing the
+    critical points:
+    >>> from scipy import signal
+    >>> import matplotlib.pyplot as plt
+    >>> b, a = signal.cheby1(4, 5, 100, 'low', analog=True)
+    >>> w, h = signal.freqs(b, a)
+    >>> plt.semilogx(w, 20 * np.log10(abs(h)))
+    >>> plt.title('Chebyshev Type I frequency response (rp=5)')
+    >>> plt.xlabel('Frequency [radians / second]')
+    >>> plt.ylabel('Amplitude [dB]')
+    >>> plt.margins(0, 0.1)
+    >>> plt.grid(which='both', axis='both')
+    >>> plt.axvline(100, color='green') # cutoff frequency
+    >>> plt.axhline(-5, color='green') # rp
+    >>> plt.show()
+    Generate a signal made up of 10 Hz and 20 Hz, sampled at 1 kHz
+    >>> t = np.linspace(0, 1, 1000, False)  # 1 second
+    >>> sig = np.sin(2*np.pi*10*t) + np.sin(2*np.pi*20*t)
+    >>> fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    >>> ax1.plot(t, sig)
+    >>> ax1.set_title('10 Hz and 20 Hz sinusoids')
+    >>> ax1.axis([0, 1, -2, 2])
+    Design a digital high-pass filter at 15 Hz to remove the 10 Hz tone, and
+    apply it to the signal. (It's recommended to use second-order sections
+    format when filtering, to avoid numerical error with transfer function
+    (``ba``) format):
+    >>> sos = signal.cheby1(10, 1, 15, 'hp', fs=1000, output='sos')
+    >>> filtered = signal.sosfilt(sos, sig)
+    >>> ax2.plot(t, filtered)
+    >>> ax2.set_title('After 15 Hz high-pass filter')
+    >>> ax2.axis([0, 1, -2, 2])
+    >>> ax2.set_xlabel('Time [seconds]')
+    >>> plt.tight_layout()
+    >>> plt.show()
+    """
+    return iirfilter(N, Wn, rp=rp, btype=btype, analog=analog,
+                     output=output, ftype='cheby1', fs=fs)
+
+def cheb1ap(N, rp):
+    """
+    Return (z,p,k) for Nth-order Chebyshev type I analog lowpass filter.
+    The returned filter prototype has `rp` decibels of ripple in the passband.
+    The filter's angular (e.g. rad/s) cutoff frequency is normalized to 1,
+    defined as the point at which the gain first drops below ``-rp``.
+    See Also
+    --------
+    cheby1 : Filter design function using this prototype
+    """
+    if abs(int(N)) != N:
+        raise ValueError("Filter order must be a nonnegative integer")
+    elif N == 0:
+        # Avoid divide-by-zero error
+        # Even order filters have DC gain of -rp dB
+        return np.array([]), np.array([]), 10**(-rp/20)
+    z = np.array([])
+
+    # Ripple factor (epsilon)
+    eps = np.sqrt(10 ** (0.1 * rp) - 1.0)
+    mu = 1.0 / N * math.asinh(1 / eps)
+
+    # Arrange poles in an ellipse on the left half of the S-plane
+    m = numpy.arange(-N+1, N, 2)
+    theta = np.pi * m / (2*N)
+    r = (mu + 1j*theta)
+    p = 1/2 * (np.exp(r) - np.exp(-r)) 
+    k = (prod(-p)).real
+    if N % 2 == 0:
+        k = k / np.sqrt((1 + eps * eps))
+
+    return z, p, k
+
 filter_dict = {'butter': [buttap, buttord],
-               'butterworth': [buttap, buttord]
-               }
+               'butterworth': [buttap, buttord],
+               'cheby1': [cheb1ap]
+              }
 
 band_dict = {'band': 'bandpass',
              'bandpass': 'bandpass',
